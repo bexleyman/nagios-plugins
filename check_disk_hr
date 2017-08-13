@@ -1,0 +1,125 @@
+#!/bin/bash
+
+# Ensure any stage of a pipe returns an error
+set -o pipefail
+
+function usage { cat << EOT
+Plugin checks the amount of free disk space on a mounted file system
+and generates an alert if free space is less than one of the threshold values.
+It determines units to display (MiB, GiB, TiB) to give easy human readable output.
+
+Usage:
+check_disc_hr -w limit -c limit -p path
+
+Options (except -h) are mandatory
+
+-h
+  Display this help
+
+-w INTEGER (% suffix optional)
+  Exit with WARNING status if less than INTEGER percentage of disk is free
+
+-c INTEGER (% suffix optional)
+  Exit with CRITICAL status if less than INTEGER percentage of disk is free
+
+-p PATH
+  Path to a mount point as displayed by df command. No trailing slash.
+  
+EOT
+}
+
+while getopts ":w:c:p:h" opt; do
+    case $opt in
+        h)
+        usage
+        exit 0
+        ;;
+        w)
+        warn=$OPTARG
+        ;;
+        c)
+        crit=$OPTARG
+        ;;
+        p)
+        fs_path=$OPTARG
+        ;;
+        *)
+        echo "$0: Required argument not given"
+        usage
+        exit 3
+        ;;
+    esac
+done
+
+# ensure we have 3 required arguments, ie none are empty strings
+for x in "$warn" "$crit" "$fs_path"; do
+    if [ -z "$x" ]; then
+        echo "$0: Required argument not given"
+        usage
+        exit 3
+    fi
+done
+
+# Strip '%' from $warn and $crit, if exists
+warn=${warn/\%}
+crit=${crit/\%}
+
+# Put filesystem information from df into an array
+# Strip 1st line column labels with sed
+fs_info=($(df --output "$fs_path" | sed 1d))
+
+# df will fail if $fs_path is not a mount point
+if [ ${?} -ne 0 ]; then
+    echo "$0: Check of $fs_path - Not a filesystem mount point"
+    exit 3
+fi
+
+# Put fs_info array values into variables
+# size at array position [6]
+# freespace at array position [8]
+# inode_size at array position [2]
+# inode_free at array position [4]
+size=${fs_info[6]}
+freespace=${fs_info[8]}
+inode_size=${fs_info[2]}
+inode_free=${fs_info[4]}
+
+
+# Calculate inode free percentage, 2 decimal places
+inode_free_percent=$(bc <<< "scale=2; $inode_free*100/$inode_size")
+
+# Calculate disk free percentage, 2 decimal places
+free_percent=$(bc <<< "scale=2; $freespace*100/$size")
+
+# Determine units for output, df returns KiB
+# 1 TiB = 1073741824 KiB
+# 1 GiB = 1048576 KiB
+
+function calc_units {
+if [ "$1" -lt 1048576 ]; then
+    echo "$(bc <<< "scale=2; $1/1024") MiB"
+elif [ "$1" -lt 1073741824 ]; then
+    echo "$(bc <<< "scale=2; $1/1048576") GiB"
+else
+    echo "$(bc <<< "scale=2; $1/1073741824") TiB"
+fi
+}
+
+# Get freespace in human readable units
+freespace_out=$(calc_units $freespace)
+
+# Get size in human readable units
+size_out=$(calc_units $size)
+
+# Truncate free_percent and compare to warn and critical levels
+if [ "${free_percent%.*}" -gt "$warn" ]; then
+    echo "OK $freespace_out of $size_out free on $fs_path ($free_percent%, inode:$inode_free_percent%)"
+    exit 0
+elif [ "${free_percent%.*}" -gt "$crit" ]; then
+    echo "Warn $freespace_out of $size_out free on $fs_path ($free_percent%, inode:$inode_free_percent%)"
+    exit 1
+else
+    echo "Critical $freespace_out of $size_out free on $fs_path ($free_percent%, inode:$inode_free_percent%)"
+    exit 2
+fi
+
