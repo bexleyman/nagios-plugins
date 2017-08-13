@@ -44,7 +44,7 @@ while getopts ":w:c:p:h" opt; do
         fs_path=$OPTARG
         ;;
         *)
-        echo "$0: Required argument not given"
+        echo "$0: Unknown argument given"
         usage
         exit 3
         ;;
