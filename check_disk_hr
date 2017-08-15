@@ -22,11 +22,16 @@
 # Ensure any stage of a pipe returns an error
 set -o pipefail
 
-function usage { cat << EOT
+function help { cat << EOT
+
 Plugin checks the amount of free disk space on a mounted file system
 and generates an alert if free space is less than one of the threshold values.
 It determines units to display (MiB, GiB, TiB) to give easy human readable output.
 
+EOT
+}
+
+function usage { cat <<EOT
 Usage:
 check_disc_hr -w limit -c limit -p path
 
@@ -51,6 +56,7 @@ EOT
 while getopts ":w:c:p:h" opt; do
     case $opt in
         h)
+        help
         usage
         exit 0
         ;;
